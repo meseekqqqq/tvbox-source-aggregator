@@ -1,0 +1,20 @@
+name = "tvbox-source-aggregator"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+
+routes = [
+  { pattern = "tvbox.rio.edu.kg/*", zone_id = "9453759b5d753b4a6ccbeefc506be0a9" }
+]
+
+[triggers]
+crons = ["0 5 * * *"]  # 每天 UTC 5:00（北京时间 13:00）运行，可按需调整
+
+[[kv_namespaces]]
+binding = "KV"
+id = "0a954fa3ef4847a1911d39eab5b3dd0b"
+preview_id = "01be699a3f2e4e85a7b907ad1ce87c95"
+
+[vars]
+SPEED_TIMEOUT_MS = "5000"
+SITE_TIMEOUT_MS = "3000"
+FETCH_TIMEOUT_MS = "5000"
