@@ -1,15 +1,14 @@
 // 批量 fetch TVBox JSON 配置
 
 import { DEFAULT_FETCH_TIMEOUT_MS } from './config';
-import type { TVBoxConfig, SourcedConfig } from './types';
-import type { ScrapedSource } from './scraper';
+import type { TVBoxConfig, SourcedConfig, SourceEntry } from './types';
 
 /**
  * 批量获取配置 JSON，并发执行，带超时
  * 返回成功获取的配置列表（失败的静默跳过）
  */
 export async function fetchConfigs(
-  sources: ScrapedSource[],
+  sources: SourceEntry[],
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<SourcedConfig[]> {
   const results = await Promise.allSettled(
@@ -34,7 +33,7 @@ export async function fetchConfigs(
  * 获取单个配置 JSON
  */
 async function fetchSingleConfig(
-  source: ScrapedSource,
+  source: SourceEntry,
   timeoutMs: number,
 ): Promise<SourcedConfig | null> {
   const controller = new AbortController();

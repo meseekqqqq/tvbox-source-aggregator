@@ -654,13 +654,12 @@ async function loadSources() {
 
     list.innerHTML = sources.map(s => \`
       <div class="source-item">
-        <span class="source-tag \${s.type}">\${s.type === 'scraped' ? 'Auto' : 'Manual'}</span>
         <div class="source-info">
           <div class="source-name">\${esc(s.name || 'Unnamed')}</div>
           <div class="source-url">\${esc(s.url)}</div>
         </div>
         <div class="source-actions">
-          <button class="btn btn-sm btn-danger" onclick="removeSource('\${esc(s.url)}', '\${s.type}')">Remove</button>
+          <button class="btn btn-sm btn-danger" onclick="removeSource('\${esc(s.url)}')">Remove</button>
         </div>
       </div>
     \`).join('');
@@ -709,12 +708,12 @@ async function addSource() {
 }
 
 // --- Remove source ---
-async function removeSource(url, type) {
+async function removeSource(url) {
   try {
     const res = await authFetch('/admin/sources', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, type })
+      body: JSON.stringify({ url })
     });
     if (res.ok) {
       toast('Source removed');

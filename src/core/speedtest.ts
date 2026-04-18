@@ -1,7 +1,7 @@
 // zbape.com 测速 API 封装
 
 import { ZBAPE_API_URL, ZBAPE_QPS_INTERVAL_MS } from './config';
-import type { SpeedTestResult, Env } from './types';
+import type { SpeedTestResult } from './types';
 
 /**
  * 对单个 URL 进行测速

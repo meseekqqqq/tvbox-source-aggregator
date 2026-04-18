@@ -1,0 +1,15 @@
+services:
+  tvbox:
+    build: .
+    ports:
+      - "${PORT:-5678}:5678"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-changeme}
+      - REFRESH_TOKEN=${REFRESH_TOKEN:-}
+      - ZBAPE_API_KEY=${ZBAPE_API_KEY:-}
+      - CRON_SCHEDULE=${CRON_SCHEDULE:-0 5 * * *}
+      - SPEED_TIMEOUT_MS=${SPEED_TIMEOUT_MS:-5000}
+      - FETCH_TIMEOUT_MS=${FETCH_TIMEOUT_MS:-5000}
+    restart: unless-stopped

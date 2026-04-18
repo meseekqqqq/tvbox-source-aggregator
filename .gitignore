@@ -2,3 +2,6 @@ node_modules/
 .wrangler/
 .dev.vars
 dist/
+data/
+.env
+.DS_Store

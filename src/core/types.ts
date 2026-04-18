@@ -75,6 +75,12 @@ export interface TVBoxConfig {
   flags?: string[];
 }
 
+// 源条目
+export interface SourceEntry {
+  name: string;
+  url: string;
+}
+
 // 内部处理用：带来源标记的配置
 export interface SourcedConfig {
   sourceUrl: string;
@@ -99,20 +105,13 @@ export interface SpeedTestResult {
   ip?: string;
 }
 
-// 管理页面：源条目（统一格式）
-export interface AdminSource {
-  name: string;
-  url: string;
-  type: 'scraped' | 'manual'; // 来源类型：自动抓取 / 手动添加
-}
-
-// Worker 环境绑定
-export interface Env {
-  KV: KVNamespace;
-  ZBAPE_API_KEY: string;
-  REFRESH_TOKEN?: string;
-  ADMIN_TOKEN?: string;
-  SPEED_TIMEOUT_MS: string;
-  SITE_TIMEOUT_MS: string;
-  FETCH_TIMEOUT_MS: string;
+// 平台无关的应用配置
+export interface AppConfig {
+  adminToken?: string;
+  refreshToken?: string;
+  zbapeApiKey?: string;
+  speedTimeoutMs: number;
+  siteTimeoutMs: number;
+  fetchTimeoutMs: number;
+  cronSchedule?: string;
 }
