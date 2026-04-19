@@ -545,6 +545,34 @@ body::before{
     </div>
   </div>
 
+  <!-- MacCMS Add -->
+  <div class="section">
+    <div class="section-title">Add MacCMS Source</div>
+    <div class="add-form">
+      <input class="name-input" type="text" id="mcKey" placeholder="Key (e.g. hongniuzy)">
+      <input class="name-input" type="text" id="mcName" placeholder="Name">
+      <input type="url" id="mcApi" placeholder="MacCMS API URL">
+      <button class="btn" id="mcAddBtn" onclick="addMacCMS()">Add</button>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="showBatchImport()">Batch Import</button>
+      <button class="btn btn-sm" onclick="importSeedData()">Import Seed (23)</button>
+    </div>
+    <textarea id="mcBatchInput" style="display:none;width:100%;margin-top:8px;min-height:120px;font-family:var(--mono);font-size:0.75rem;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;resize:vertical" placeholder='[{"key":"...","name":"...","api":"..."}]'></textarea>
+    <button class="btn btn-sm" id="mcBatchBtn" style="display:none;margin-top:8px" onclick="batchImportMacCMS()">Submit Batch</button>
+  </div>
+
+  <!-- MacCMS list -->
+  <div class="section">
+    <div class="section-title">
+      <span>MacCMS Sources</span>
+      <span class="count" id="mcCount">0</span>
+    </div>
+    <div class="source-list" id="mcList">
+      <div class="empty">Loading MacCMS sources...</div>
+    </div>
+  </div>
+
   <div class="footer">
     TVBox Source Aggregator &middot; Admin Console
   </div>
@@ -614,6 +642,7 @@ function toast(msg, type = 'success') {
 // --- Load data ---
 function loadAll() {
   loadSources();
+  loadMacCMS();
   loadStatus();
 }
 
@@ -725,6 +754,173 @@ async function removeSource(url) {
   } catch {
     toast('Network error', 'error');
   }
+}
+
+// --- MacCMS ---
+async function loadMacCMS() {
+  const list = $('mcList');
+  try {
+    const res = await authFetch('/admin/maccms');
+    const sources = await res.json();
+    $('mcCount').textContent = sources.length;
+
+    if (sources.length === 0) {
+      list.innerHTML = '<div class="empty">No MacCMS sources. Add above or import seed data.</div>';
+      return;
+    }
+
+    list.innerHTML = sources.map(s => \`
+      <div class="source-item">
+        <span class="source-tag manual">\${esc(s.key)}</span>
+        <div class="source-info">
+          <div class="source-name">\${esc(s.name)}</div>
+          <div class="source-url">\${esc(s.api)}</div>
+        </div>
+        <div class="source-actions" style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="validateMC('\${esc(s.api)}')">Test</button>
+          <button class="btn btn-sm btn-danger" onclick="removeMC('\${esc(s.key)}')">Remove</button>
+        </div>
+      </div>
+    \`).join('');
+  } catch {
+    list.innerHTML = '<div class="empty">Failed to load MacCMS sources</div>';
+  }
+}
+
+async function addMacCMS() {
+  const key = $('mcKey').value.trim();
+  const name = $('mcName').value.trim();
+  const api = $('mcApi').value.trim();
+  if (!key || !name || !api) { toast('All fields required', 'error'); return; }
+
+  const btn = $('mcAddBtn');
+  btn.textContent = 'Adding...';
+  btn.className = 'btn loading';
+
+  try {
+    const res = await authFetch('/admin/maccms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, name, api })
+    });
+    const d = await res.json();
+    if (res.ok) {
+      toast('Added ' + (d.added || 1) + ' MacCMS source(s)');
+      $('mcKey').value = '';
+      $('mcName').value = '';
+      $('mcApi').value = '';
+      loadMacCMS();
+    } else {
+      toast(d.error || 'Failed', 'error');
+    }
+  } catch { toast('Network error', 'error'); }
+
+  btn.textContent = 'Add';
+  btn.className = 'btn';
+}
+
+async function removeMC(key) {
+  try {
+    const res = await authFetch('/admin/maccms', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key })
+    });
+    if (res.ok) { toast('Removed'); loadMacCMS(); }
+    else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
+  } catch { toast('Network error', 'error'); }
+}
+
+async function validateMC(api) {
+  toast('Testing...');
+  try {
+    const res = await authFetch('/admin/maccms/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api })
+    });
+    const d = await res.json();
+    toast(d.valid ? 'Valid' : 'Invalid / Unreachable', d.valid ? 'success' : 'error');
+  } catch { toast('Network error', 'error'); }
+}
+
+function showBatchImport() {
+  const ta = $('mcBatchInput');
+  const btn = $('mcBatchBtn');
+  const show = ta.style.display === 'none';
+  ta.style.display = show ? 'block' : 'none';
+  btn.style.display = show ? 'inline-block' : 'none';
+  if (show) ta.focus();
+}
+
+async function batchImportMacCMS() {
+  const raw = $('mcBatchInput').value.trim();
+  if (!raw) return;
+  let data;
+  try { data = JSON.parse(raw); } catch { toast('Invalid JSON', 'error'); return; }
+  if (!Array.isArray(data)) { toast('Must be a JSON array', 'error'); return; }
+
+  try {
+    const res = await authFetch('/admin/maccms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const d = await res.json();
+    if (res.ok) {
+      toast('Imported ' + (d.added || 0) + ' source(s)');
+      $('mcBatchInput').value = '';
+      $('mcBatchInput').style.display = 'none';
+      $('mcBatchBtn').style.display = 'none';
+      loadMacCMS();
+    } else {
+      toast(d.error || 'Import failed', 'error');
+    }
+  } catch { toast('Network error', 'error'); }
+}
+
+const SEED_DATA = [
+  {"key":"hongniuzy","name":"\\u7EA2\\u725B\\u8D44\\u6E90\\u7AD9","api":"https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/at/json/"},
+  {"key":"wjwsyziyuan","name":"\\u65E0\\u5C3D\\u8D44\\u6E90\\u7AD9","api":"https://api.wujinwszy.net/api.php/provide/vod/from/wjwsym3u8/at/json/"},
+  {"key":"shandianzy","name":"\\u95EA\\u7535\\u8D44\\u6E90\\u7AD9","api":"https://xsd.sdzyapi.com/api.php/provide/vod/from/sdm3u8/at/json/"},
+  {"key":"ziyuanku","name":"\\u4F18\\u8D28\\u8D44\\u6E90\\u5E93","api":"http://api.yzzy-api.com/inc/api_mac10.php"},
+  {"key":"xinlangzy","name":"\\u65B0\\u6D6A\\u8D44\\u6E90\\u7AD9","api":"https://api.xinlangapi.com/xinlangapi.php/provide/vod/from/xlm3u8/at/json/"},
+  {"key":"subozy","name":"\\u901F\\u64AD\\u8D44\\u6E90\\u7AD9","api":"https://subocaiji.com/api.php/provide/vod/from/subm3u8/at/json/"},
+  {"key":"jisuzy","name":"\\u6781\\u901F\\u8D44\\u6E90\\u7AD9","api":"https://jszyapi.com/api.php/provide/vod/from/jsm3u8/at/json/"},
+  {"key":"maotaizy","name":"\\u8305\\u53F0\\u8D44\\u6E90\\u7AD9","api":"https://caiji.maotaizy.cc/api.php/provide/vod/from/mtm3u8/at/json/"},
+  {"key":"huohuzy","name":"\\u8C6A\\u534E\\u8D44\\u6E90\\u7AD9","api":"https://hhzyapi.com/api.php/provide/vod/from/hhm3u8/at/json/"},
+  {"key":"doubanzy","name":"\\u8C46\\u74E3\\u8D44\\u6E90\\u7AD9","api":"https://caiji.dbzy5.com/api.php/provide/vod/from/dbm3u8/at/json/"},
+  {"key":"okzy","name":"OK\\u8D44\\u6E90\\u7AD9","api":"https://api.okzyw.net/api.php/provide/vod/from/okm3u8/at/json/"},
+  {"key":"yayazy","name":"\\u9E2D\\u9E2D\\u8D44\\u6E90\\u7AD9","api":"https://cj.yayazy.net/api.php/provide/vod/from/yym3u8/at/json/"},
+  {"key":"yutuzy","name":"\\u7389\\u5154\\u8D44\\u6E90\\u7AD9","api":"https://apiyutu.com/api.php/provide/vod/at/json/"},
+  {"key":"ruyizy","name":"\\u5982\\u610F\\u8D44\\u6E90\\u7AD9","api":"https://cj.rycjapi.com/api.php/provide/vod/from/rym3u8/at/json/"},
+  {"key":"ckzyme","name":"CK\\u8D44\\u6E90\\u7AD9","api":"https://ckzy.me/api.php/provide/vod/at/json/"},
+  {"key":"zuidazy","name":"\\u6700\\u5927\\u8D44\\u6E90\\u7AD9","api":"https://api.zuidapi.com/api.php/provide/vod/from/zuidam3u8/at/json/"},
+  {"key":"suonizy","name":"\\u7D22\\u5C3C\\u8D44\\u6E90\\u7AD9","api":"https://suoniapi.com/api.php/provide/vod/from/snm3u8/at/json/"},
+  {"key":"niuniuzy","name":"\\u725B\\u725B\\u8D44\\u6E90\\u7AD9","api":"https://api.niuniuzy.me/api.php/provide/vod/from/nnm3u8/at/json/"},
+  {"key":"hsckzy","name":"\\u9EC4\\u8272\\u4ED3\\u5E93\\u8D44\\u6E90","api":"https://hsckzy888.com/api.php/provide/vod/from/hsckm3u8/at/json/"},
+  {"key":"dyttzy","name":"\\u7535\\u5F71\\u5929\\u5802\\u8D44\\u6E90","api":"http://caiji.dyttzyapi.com/api.php/provide/vod/from/dyttm3u8/at/json/"},
+  {"key":"xinbazy","name":"\\u674F\\u5427\\u8D44\\u6E90\\u7AD9","api":"https://xingba222.com/api.php/provide/vod/at/json/"},
+  {"key":"xiangjiaozy","name":"\\u9999\\u8549\\u8D44\\u6E90\\u7AD9","api":"https://www.xiangjiaozyw.com/api.php/provide/vod/at/json/"},
+  {"key":"xibaozyw","name":"\\u7EC6\\u80DE\\u8D44\\u6E90\\u7AD9","api":"https://www.xxibaozyw.com/api.php/provide/vod/at/json/"}
+];
+
+async function importSeedData() {
+  if (!confirm('Import 23 recommended MacCMS sources?')) return;
+  try {
+    const res = await authFetch('/admin/maccms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(SEED_DATA)
+    });
+    const d = await res.json();
+    if (res.ok) {
+      toast('Imported ' + (d.added || 0) + ' source(s), total: ' + (d.total || 0));
+      loadMacCMS();
+    } else {
+      toast(d.error || 'Import failed', 'error');
+    }
+  } catch { toast('Network error', 'error'); }
 }
 
 // --- Refresh ---

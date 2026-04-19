@@ -68,15 +68,17 @@ function main() {
   const app = createApp({
     storage,
     config,
-    triggerRefresh: () => {
+    triggerRefresh: async () => {
       if (refreshRunning) {
         console.log('[aggregation] Already running, skipping');
         return;
       }
       refreshRunning = true;
-      runAggregation(storage, config)
-        .catch((err) => console.error('[aggregation] Error:', err))
-        .finally(() => { refreshRunning = false; });
+      try {
+        await runAggregation(storage, config);
+      } finally {
+        refreshRunning = false;
+      }
     },
   });
 

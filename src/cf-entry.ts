@@ -14,6 +14,7 @@ interface CfEnv {
   SPEED_TIMEOUT_MS?: string;
   SITE_TIMEOUT_MS?: string;
   FETCH_TIMEOUT_MS?: string;
+  WORKER_BASE_URL?: string;
 }
 
 function buildConfig(env: CfEnv): AppConfig {
@@ -24,6 +25,7 @@ function buildConfig(env: CfEnv): AppConfig {
     speedTimeoutMs: parseInt(env.SPEED_TIMEOUT_MS || '') || DEFAULT_SPEED_TIMEOUT_MS,
     siteTimeoutMs: parseInt(env.SITE_TIMEOUT_MS || '') || DEFAULT_SITE_TIMEOUT_MS,
     fetchTimeoutMs: parseInt(env.FETCH_TIMEOUT_MS || '') || DEFAULT_FETCH_TIMEOUT_MS,
+    workerBaseUrl: env.WORKER_BASE_URL || undefined,
   };
 }
 
@@ -35,9 +37,7 @@ export default {
     const app = createApp({
       storage,
       config,
-      triggerRefresh: () => {
-        ctx.waitUntil(runAggregation(storage, config));
-      },
+      triggerRefresh: () => runAggregation(storage, config),
     });
 
     return app.fetch(request);

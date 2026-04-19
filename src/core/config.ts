@@ -14,3 +14,4 @@ export const KV_MERGED_CONFIG = 'merged_config';
 export const KV_SOURCE_URLS = 'source_urls';
 export const KV_LAST_UPDATE = 'last_update';
 export const KV_MANUAL_SOURCES = 'manual_sources';
+export const KV_MACCMS_SOURCES = 'maccms_sources';
