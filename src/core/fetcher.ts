@@ -5,24 +5,57 @@ import type { TVBoxConfig, SourcedConfig, SourceEntry } from './types';
 
 /**
  * 批量获取配置 JSON，并发执行，带超时
+ * 自动检测多仓格式（storeHouse / urls），展开为子 URL 后二次 fetch
  * 返回成功获取的配置列表（失败的静默跳过）
  */
 export async function fetchConfigs(
   sources: SourceEntry[],
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<SourcedConfig[]> {
-  const results = await Promise.allSettled(
+  // 第一轮：fetch 所有源
+  const firstPassResults = await Promise.allSettled(
     sources.map((source) => fetchSingleConfig(source, timeoutMs)),
   );
 
   const configs: SourcedConfig[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
+  const multiRepoChildren: SourceEntry[] = [];
+
+  for (let i = 0; i < firstPassResults.length; i++) {
+    const result = firstPassResults[i];
     if (result.status === 'fulfilled' && result.value) {
-      configs.push(result.value);
+      if (isMultiRepoConfig(result.value.config)) {
+        const children = extractMultiRepoEntries(result.value.config, result.value.sourceName);
+        console.log(`[fetcher] Detected multi-repo: ${sources[i].url} → ${children.length} sub-sources`);
+        multiRepoChildren.push(...children);
+      } else {
+        configs.push(result.value);
+      }
     } else if (result.status === 'rejected') {
       console.warn(`[fetcher] Failed to fetch ${sources[i].url}: ${result.reason}`);
     }
+  }
+
+  // 第二轮：展开多仓子 URL（限一层，不递归）
+  if (multiRepoChildren.length > 0) {
+    console.log(`[fetcher] Expanding ${multiRepoChildren.length} multi-repo sub-sources...`);
+    const secondPassResults = await Promise.allSettled(
+      multiRepoChildren.map((source) => fetchSingleConfig(source, timeoutMs)),
+    );
+
+    for (let i = 0; i < secondPassResults.length; i++) {
+      const result = secondPassResults[i];
+      if (result.status === 'fulfilled' && result.value) {
+        if (isMultiRepoConfig(result.value.config)) {
+          console.log(`[fetcher] Skipping nested multi-repo: ${multiRepoChildren[i].url}`);
+        } else {
+          configs.push(result.value);
+        }
+      } else if (result.status === 'rejected') {
+        console.warn(`[fetcher] Failed to fetch sub-source ${multiRepoChildren[i].url}: ${result.reason}`);
+      }
+    }
+
+    console.log(`[fetcher] Multi-repo expansion: ${configs.length} total configs after expansion`);
   }
 
   console.log(`[fetcher] Fetched ${configs.length}/${sources.length} configs successfully`);
@@ -120,6 +153,51 @@ function tryParseJson(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 检测是否为多仓格式（索引 JSON 而非单仓 TVBoxConfig）
+ * 支持两种格式：
+ * - storeHouse: {"storeHouse": [{"sourceName": "...", "sourceUrl": "..."}]}
+ * - urls: {"urls": [{"name": "...", "url": "..."}]}（需排除有 sites 的单仓）
+ */
+function isMultiRepoConfig(config: TVBoxConfig): boolean {
+  const raw = config as Record<string, unknown>;
+  if (Array.isArray(raw.storeHouse)) return true;
+  if (Array.isArray(raw.urls) && !config.sites) return true;
+  return false;
+}
+
+/**
+ * 从多仓 JSON 中提取子源 URL 列表
+ */
+function extractMultiRepoEntries(config: TVBoxConfig, parentName: string): SourceEntry[] {
+  const raw = config as Record<string, unknown>;
+  const entries: SourceEntry[] = [];
+
+  if (Array.isArray(raw.storeHouse)) {
+    for (const item of raw.storeHouse as Record<string, unknown>[]) {
+      const url = item?.sourceUrl;
+      if (typeof url === 'string' && url.trim()) {
+        entries.push({
+          name: typeof item.sourceName === 'string' ? item.sourceName : parentName,
+          url: url.trim(),
+        });
+      }
+    }
+  } else if (Array.isArray(raw.urls)) {
+    for (const item of raw.urls as Record<string, unknown>[]) {
+      const url = item?.url;
+      if (typeof url === 'string' && url.trim()) {
+        entries.push({
+          name: typeof item.name === 'string' ? item.name : parentName,
+          url: url.trim(),
+        });
+      }
+    }
+  }
+
+  return entries;
 }
 
 /**
