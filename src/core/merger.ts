@@ -137,3 +137,42 @@ function findFullSpiderString(configs: SourcedConfig[], jarUrl: string): string 
   }
   return null;
 }
+
+/**
+ * 清洗本地引用（127.0.0.1 / localhost）
+ * 这些地址依赖用户本地 TVBox 代理服务，聚合后对其他用户是死链
+ */
+export function cleanLocalRefs(config: TVBoxConfig): TVBoxConfig {
+  const isLocal = (url: string) =>
+    url.includes('127.0.0.1') || url.includes('localhost');
+
+  const sites = (config.sites || []).filter((site) => {
+    // 过滤 api 包含本地地址的站点
+    if (site.api && isLocal(site.api)) {
+      console.log(`[cleaner] Removed site ${site.key}: local api ${site.api}`);
+      return false;
+    }
+    // 过滤 ext 字符串包含本地地址的站点
+    if (typeof site.ext === 'string' && isLocal(site.ext)) {
+      console.log(`[cleaner] Removed site ${site.key}: local ext`);
+      return false;
+    }
+    return true;
+  });
+
+  const lives = (config.lives || []).filter((live) => {
+    if (live.url && isLocal(live.url)) {
+      console.log(`[cleaner] Removed live ${live.name || 'unnamed'}: local url ${live.url}`);
+      return false;
+    }
+    return true;
+  });
+
+  const removedSites = (config.sites?.length || 0) - sites.length;
+  const removedLives = (config.lives?.length || 0) - lives.length;
+  if (removedSites > 0 || removedLives > 0) {
+    console.log(`[cleaner] Removed ${removedSites} sites, ${removedLives} lives with local refs`);
+  }
+
+  return { ...config, sites, lives };
+}

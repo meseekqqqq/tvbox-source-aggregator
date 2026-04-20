@@ -49,12 +49,14 @@ export function deduplicateSites(sites: TVBoxSite[]): TVBoxSite[] {
 }
 
 /**
- * 解析器去重 (name + url)
+ * 解析器去重 (url + type)
+ * 按 url+type 去重而非 name+url，同一 URL 不同 name 视为同一解析
+ * 保留 type 维度防止嗅探(0)和 JSON(1)解析被误合并
  */
 export function deduplicateParses(parses: TVBoxParse[]): TVBoxParse[] {
   const seen = new Set<string>();
   return parses.filter((parse) => {
-    const key = `${parse.name}|${parse.url}`;
+    const key = `${parse.url}|${parse.type ?? 0}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

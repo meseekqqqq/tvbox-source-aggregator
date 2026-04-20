@@ -2,11 +2,16 @@
 
 import { Hono } from 'hono';
 import type { Storage } from './storage/interface';
-import type { AppConfig, SourceEntry, MacCMSSourceEntry } from './core/types';
-import { KV_MERGED_CONFIG, KV_MANUAL_SOURCES, KV_LAST_UPDATE, KV_MACCMS_SOURCES } from './core/config';
+import type { AppConfig, SourceEntry, MacCMSSourceEntry, LiveSourceEntry } from './core/types';
+import { KV_MERGED_CONFIG, KV_MANUAL_SOURCES, KV_LAST_UPDATE, KV_MACCMS_SOURCES, KV_LIVE_SOURCES, KV_BLACKLIST, LIVE_PROXY_TTL } from './core/config';
 import { validateMacCMS } from './core/maccms';
+import { lookupJarUrl, isMd5Key } from './core/jar-proxy';
+import { lookupLiveUrl } from './core/live-source';
 import { adminHtml } from './core/admin';
 import { dashboardHtml } from './core/dashboard';
+import { configEditorHtml } from './core/config-editor';
+import { siteFingerprint, loadBlacklist, saveBlacklist } from './core/blacklist';
+import type { TVBoxConfig } from './core/types';
 
 export interface AppDeps {
   storage: Storage;
@@ -36,6 +41,27 @@ export function createApp(deps: AppDeps): Hono {
     });
   });
 
+  // ─── 纯直播配置 ────────────────────────────────────────
+  app.get('/live-config', async (c) => {
+    const cached = await storage.get(KV_MERGED_CONFIG);
+
+    if (!cached) {
+      return c.json({ error: 'No config available yet.' }, 503);
+    }
+
+    try {
+      const full = JSON.parse(cached);
+      const liveConfig = { lives: full.lives || [] };
+      return c.body(JSON.stringify(liveConfig), 200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'public, max-age=1800',
+        'Access-Control-Allow-Origin': '*',
+      });
+    } catch {
+      return c.json({ error: 'Config parse error' }, 500);
+    }
+  });
+
   // ─── 监控面板 ──────────────────────────────────────────
   app.get('/status', (c) => {
     return c.html(dashboardHtml);
@@ -45,6 +71,7 @@ export function createApp(deps: AppDeps): Hono {
     const lastUpdate = await storage.get(KV_LAST_UPDATE);
     const sources = await storage.get(KV_MANUAL_SOURCES);
     const macCMSSources = await storage.get(KV_MACCMS_SOURCES);
+    const liveSources = await storage.get(KV_LIVE_SOURCES);
     const cached = await storage.get(KV_MERGED_CONFIG);
 
     let siteCount = 0;
@@ -65,6 +92,7 @@ export function createApp(deps: AppDeps): Hono {
       lastUpdate: lastUpdate || 'never',
       sourceCount: sources ? JSON.parse(sources).length : 0,
       macCMSCount: macCMSSources ? JSON.parse(macCMSSources).length : 0,
+      liveSourceCount: liveSources ? JSON.parse(liveSources).length : 0,
       sites: siteCount,
       parses: parseCount,
       lives: liveCount,
@@ -175,6 +203,165 @@ export function createApp(deps: AppDeps): Hono {
     });
   }
 
+  // ─── JAR 代理（仅 CF 版）─────────────────────────────
+  if (config.workerBaseUrl) {
+    app.get('/jar/:key', async (c) => {
+      const key = c.req.param('key');
+
+      // 1. 查 CF Cache
+      const cache = (caches as any).default as Cache;
+      const cacheKey = new Request(c.req.url);
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+
+      // 2. 查 KV 拿原始 URL
+      const originalUrl = await lookupJarUrl(key, storage);
+      if (!originalUrl) {
+        return c.json({ error: 'Unknown JAR key' }, 404);
+      }
+
+      // 3. 流式透传
+      try {
+        const resp = await fetch(originalUrl, {
+          headers: { 'User-Agent': 'okhttp/3.12.0' },
+        });
+
+        if (!resp.ok) {
+          return c.json({ error: `Origin returned ${resp.status}` }, 502);
+        }
+
+        // 4. 构建响应 + 异步写缓存
+        const ttl = isMd5Key(key) ? 86400 : 21600; // MD5 key → 24h, URL hash → 6h
+        const response = new Response(resp.body, {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Cache-Control': `public, max-age=${ttl}`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+
+        c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+        return response;
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return c.json({ error: msg }, 502);
+      }
+    });
+  }
+
+  // ─── 直播源代理（仅 CF 版）──────────────────────────────
+  if (config.workerBaseUrl) {
+    app.get('/live/:key', async (c) => {
+      const key = c.req.param('key');
+
+      // 1. 查 CF Cache
+      const cache = (caches as any).default as Cache;
+      const cacheKey = new Request(c.req.url);
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+
+      // 2. 查 KV 拿原始 URL
+      const originalUrl = await lookupLiveUrl(key, storage);
+      if (!originalUrl) {
+        return c.json({ error: 'Unknown live source key' }, 404);
+      }
+
+      // 3. 流式透传
+      try {
+        const resp = await fetch(originalUrl, {
+          headers: { 'User-Agent': 'okhttp/3.12.0' },
+        });
+
+        if (!resp.ok) {
+          return c.json({ error: `Origin returned ${resp.status}` }, 502);
+        }
+
+        // 4. 构建响应 + 异步写缓存
+        const response = new Response(resp.body, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': `public, max-age=${LIVE_PROXY_TTL}`,
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+
+        c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+        return response;
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return c.json({ error: msg }, 502);
+      }
+    });
+  }
+
+  // ─── Live Sources Admin API ────────────────────────────
+  app.get('/admin/lives', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const raw = await storage.get(KV_LIVE_SOURCES);
+    const entries: LiveSourceEntry[] = raw ? JSON.parse(raw) : [];
+    return c.json(entries);
+  });
+
+  app.post('/admin/lives', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: { name?: string; url?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const url = body.url?.trim();
+    if (!url) return c.json({ error: 'URL is required' }, 400);
+
+    try {
+      new URL(url);
+    } catch {
+      return c.json({ error: 'Invalid URL format' }, 400);
+    }
+
+    const name = body.name?.trim() || '';
+    const raw = await storage.get(KV_LIVE_SOURCES);
+    const entries: LiveSourceEntry[] = raw ? JSON.parse(raw) : [];
+
+    if (entries.some((e) => e.url === url)) {
+      return c.json({ error: 'Live source already exists' }, 409);
+    }
+
+    entries.push({ name, url });
+    await storage.put(KV_LIVE_SOURCES, JSON.stringify(entries));
+
+    return c.json({ success: true });
+  });
+
+  app.delete('/admin/lives', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: { url?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const url = body.url?.trim();
+    if (!url) return c.json({ error: 'URL is required' }, 400);
+
+    const raw = await storage.get(KV_LIVE_SOURCES);
+    const entries: LiveSourceEntry[] = raw ? JSON.parse(raw) : [];
+    const filtered = entries.filter((e) => e.url !== url);
+    await storage.put(KV_LIVE_SOURCES, JSON.stringify(filtered));
+
+    return c.json({ success: true });
+  });
+
   // ─── MacCMS Admin API ─────────────────────────────────
   app.get('/admin/maccms', async (c) => {
     if (!verifyAdmin(c.req.raw, config)) {
@@ -268,6 +455,115 @@ export function createApp(deps: AppDeps): Hono {
 
     const ok = await validateMacCMS(api, config.siteTimeoutMs);
     return c.json({ api, valid: ok });
+  });
+
+  // ─── Config Editor 页面 ─────────────────────────────────
+  app.get('/admin/config-editor', (c) => {
+    return c.html(configEditorHtml);
+  });
+
+  // ─── Config Editor API ─────────────────────────────────
+  app.get('/admin/config-data', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const cached = await storage.get(KV_MERGED_CONFIG);
+    if (!cached) {
+      return c.json({ sites: [], parses: [], lives: [] });
+    }
+
+    let parsed: TVBoxConfig;
+    try {
+      parsed = JSON.parse(cached);
+    } catch {
+      return c.json({ error: 'Config parse error' }, 500);
+    }
+
+    const blacklist = await loadBlacklist(storage);
+    const siteSet = new Set(blacklist.sites);
+    const parseSet = new Set(blacklist.parses);
+    const liveSet = new Set(blacklist.lives);
+
+    // Build sites with fingerprint + blocked status + group
+    const sites = [];
+    for (const site of parsed.sites || []) {
+      const fp = await siteFingerprint(site);
+      const api = site.api || '';
+      let group = '其他';
+      if (api.startsWith('csp_') || api.startsWith('py_') || api.startsWith('js_')) {
+        group = api;
+      } else if (api.startsWith('http')) {
+        try { group = '远程: ' + new URL(api).hostname; } catch { group = '远程源'; }
+      }
+      sites.push({ ...site, fingerprint: fp, blocked: siteSet.has(fp), group });
+    }
+
+    const parses = (parsed.parses || []).map(p => ({
+      ...p,
+      blocked: parseSet.has(p.url),
+    }));
+
+    const lives = (parsed.lives || []).map(l => ({
+      ...l,
+      blocked: liveSet.has(l.url || l.api || ''),
+    }));
+
+    return c.json({ sites, parses, lives });
+  });
+
+  app.post('/admin/blacklist', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: { type?: string; id?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const { type, id } = body;
+    if (!type || !id) return c.json({ error: 'type and id are required' }, 400);
+    if (!['sites', 'parses', 'lives'].includes(type)) {
+      return c.json({ error: 'type must be sites, parses, or lives' }, 400);
+    }
+
+    const blacklist = await loadBlacklist(storage);
+    const list = blacklist[type as keyof typeof blacklist] as string[];
+    if (!list.includes(id)) {
+      list.push(id);
+    }
+    await saveBlacklist(storage, blacklist);
+
+    return c.json({ success: true });
+  });
+
+  app.delete('/admin/blacklist', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: { type?: string; id?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const { type, id } = body;
+    if (!type || !id) return c.json({ error: 'type and id are required' }, 400);
+    if (!['sites', 'parses', 'lives'].includes(type)) {
+      return c.json({ error: 'type must be sites, parses, or lives' }, 400);
+    }
+
+    const blacklist = await loadBlacklist(storage);
+    const key = type as keyof typeof blacklist;
+    (blacklist[key] as string[]) = (blacklist[key] as string[]).filter((v: string) => v !== id);
+    await saveBlacklist(storage, blacklist);
+
+    return c.json({ success: true });
   });
 
   // ─── 刷新 ─────────────────────────────────────────────

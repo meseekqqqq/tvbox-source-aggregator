@@ -82,6 +82,12 @@ export interface MacCMSSourceEntry {
   api: string;    // 原始 API，如 "https://www.hongniuzy2.com/api.php/provide/vod/from/hnm3u8/at/json/"
 }
 
+// 直播源条目
+export interface LiveSourceEntry {
+  name: string;
+  url: string;
+}
+
 // 源条目
 export interface SourceEntry {
   name: string;
@@ -96,27 +102,10 @@ export interface SourcedConfig {
   speedMs?: number; // 配置 URL 响应时间
 }
 
-// 测速结果
-export interface SpeedTestResult {
-  code: number;
-  msg: string;
-  data?: {
-    host: string;
-    ip: string;
-    location: string;
-    max: string;
-    min: string;
-    average: string;
-  };
-  exec_time?: number;
-  ip?: string;
-}
-
 // 平台无关的应用配置
 export interface AppConfig {
   adminToken?: string;
   refreshToken?: string;
-  zbapeApiKey?: string;
   speedTimeoutMs: number;
   siteTimeoutMs: number;
   fetchTimeoutMs: number;
