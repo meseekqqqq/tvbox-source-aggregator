@@ -3,63 +3,77 @@
 import { DEFAULT_FETCH_TIMEOUT_MS } from './config';
 import type { TVBoxConfig, SourcedConfig, SourceEntry } from './types';
 
+const MAX_MULTI_REPO_DEPTH = 3; // 多仓最大展开深度
+
 /**
  * 批量获取配置 JSON，并发执行，带超时
- * 自动检测多仓格式（storeHouse / urls），展开为子 URL 后二次 fetch
+ * 自动检测多仓格式（storeHouse / urls），递归展开（最多 3 层）
  * 返回成功获取的配置列表（失败的静默跳过）
  */
 export async function fetchConfigs(
   sources: SourceEntry[],
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<SourcedConfig[]> {
-  // 第一轮：fetch 所有源
-  const firstPassResults = await Promise.allSettled(
-    sources.map((source) => fetchSingleConfig(source, timeoutMs)),
+  const configs: SourcedConfig[] = [];
+  const seen = new Set<string>(); // URL 去重，防循环引用
+
+  await expandSources(sources, configs, seen, timeoutMs, 0);
+
+  console.log(`[fetcher] Fetched ${configs.length} configs from ${sources.length} top-level sources`);
+  return configs;
+}
+
+/**
+ * 递归展开多仓源
+ */
+async function expandSources(
+  sources: SourceEntry[],
+  configs: SourcedConfig[],
+  seen: Set<string>,
+  timeoutMs: number,
+  depth: number,
+): Promise<void> {
+  // 去重
+  const uniqueSources = sources.filter(s => {
+    if (seen.has(s.url)) return false;
+    seen.add(s.url);
+    return true;
+  });
+
+  if (uniqueSources.length === 0) return;
+
+  const tag = depth === 0 ? '' : ` (depth ${depth})`;
+  console.log(`[fetcher] Fetching ${uniqueSources.length} sources${tag}...`);
+
+  const results = await Promise.allSettled(
+    uniqueSources.map((source) => fetchSingleConfig(source, timeoutMs)),
   );
 
-  const configs: SourcedConfig[] = [];
   const multiRepoChildren: SourceEntry[] = [];
 
-  for (let i = 0; i < firstPassResults.length; i++) {
-    const result = firstPassResults[i];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
     if (result.status === 'fulfilled' && result.value) {
       if (isMultiRepoConfig(result.value.config)) {
         const children = extractMultiRepoEntries(result.value.config, result.value.sourceName);
-        console.log(`[fetcher] Detected multi-repo: ${sources[i].url} → ${children.length} sub-sources`);
-        multiRepoChildren.push(...children);
+        console.log(`[fetcher] Multi-repo: ${uniqueSources[i].url} → ${children.length} sub-sources`);
+        if (depth < MAX_MULTI_REPO_DEPTH) {
+          multiRepoChildren.push(...children);
+        } else {
+          console.log(`[fetcher] Max depth reached, skipping expansion of ${uniqueSources[i].url}`);
+        }
       } else {
         configs.push(result.value);
       }
     } else if (result.status === 'rejected') {
-      console.warn(`[fetcher] Failed to fetch ${sources[i].url}: ${result.reason}`);
+      console.warn(`[fetcher] Failed: ${uniqueSources[i].url}: ${result.reason}`);
     }
   }
 
-  // 第二轮：展开多仓子 URL（限一层，不递归）
+  // 递归展开子多仓
   if (multiRepoChildren.length > 0) {
-    console.log(`[fetcher] Expanding ${multiRepoChildren.length} multi-repo sub-sources...`);
-    const secondPassResults = await Promise.allSettled(
-      multiRepoChildren.map((source) => fetchSingleConfig(source, timeoutMs)),
-    );
-
-    for (let i = 0; i < secondPassResults.length; i++) {
-      const result = secondPassResults[i];
-      if (result.status === 'fulfilled' && result.value) {
-        if (isMultiRepoConfig(result.value.config)) {
-          console.log(`[fetcher] Skipping nested multi-repo: ${multiRepoChildren[i].url}`);
-        } else {
-          configs.push(result.value);
-        }
-      } else if (result.status === 'rejected') {
-        console.warn(`[fetcher] Failed to fetch sub-source ${multiRepoChildren[i].url}: ${result.reason}`);
-      }
-    }
-
-    console.log(`[fetcher] Multi-repo expansion: ${configs.length} total configs after expansion`);
+    await expandSources(multiRepoChildren, configs, seen, timeoutMs, depth + 1);
   }
-
-  console.log(`[fetcher] Fetched ${configs.length}/${sources.length} configs successfully`);
-  return configs;
 }
 
 /**
