@@ -13,7 +13,7 @@ crons = ["0 5 * * *"]  # 每天 UTC 5:00（北京时间 13:00）运行，可按�
 
 [[kv_namespaces]]
 binding = "KV"
-id = "0a954fa3ef4847a1911d39eab5b3dd0b"
+id = "10026447e26f425f826b098145c93429"
 preview_id = "01be699a3f2e4e85a7b907ad1ce87c95"
 
 [vars]
