@@ -4,9 +4,9 @@ compatibility_date = "2024-12-30"
 
 # 自定义域名（可选，推荐配置）
 # 取消注释并替换为你自己的域名和 Zone ID
-# routes = [
-#   { pattern = "tvbox.yourdomain.com/*", zone_id = "your-zone-id" }
-# ]
+ routes = [
+   { pattern = "tvvv.oolist.dpdns.org/*", zone_id = "b01bf14f1a7f47300c41befe48767bba" }
+ ]
 
 [triggers]
 crons = ["0 5 * * *"]  # 每天 UTC 5:00（北京时间 13:00）运行，可按需调整
