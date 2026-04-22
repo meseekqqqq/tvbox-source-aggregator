@@ -20,3 +20,9 @@ export const LIVE_PROXY_TTL = 7200; // 2 小时
 
 // 黑名单
 export const KV_BLACKLIST = 'blacklist';
+
+// JSON 导入：内联配置前缀
+export const KV_INLINE_PREFIX = 'inline_config_';
+
+// 名称定制配置
+export const KV_NAME_TRANSFORM = 'name_transform';

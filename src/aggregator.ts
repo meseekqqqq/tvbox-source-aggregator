@@ -9,8 +9,11 @@ import { macCMSToTVBoxSites, processMacCMSForLocal } from './core/maccms';
 import { rewriteJarUrls } from './core/jar-proxy';
 import { scrapeLiveSources } from './core/live-scraper';
 import { batchTestLiveSources, liveSourcesToTVBoxLives } from './core/live-source';
-import { KV_MERGED_CONFIG, KV_MERGED_CONFIG_FULL, KV_SOURCE_URLS, KV_LAST_UPDATE, KV_MANUAL_SOURCES, KV_MACCMS_SOURCES, KV_LIVE_SOURCES, KV_BLACKLIST } from './core/config';
+import { KV_MERGED_CONFIG, KV_MERGED_CONFIG_FULL, KV_SOURCE_URLS, KV_LAST_UPDATE, KV_MANUAL_SOURCES, KV_MACCMS_SOURCES, KV_LIVE_SOURCES, KV_BLACKLIST, KV_INLINE_PREFIX, KV_NAME_TRANSFORM } from './core/config';
 import { loadBlacklist, applyBlacklist, pruneBlacklist, saveBlacklist } from './core/blacklist';
+import { transformSiteNames } from './core/cleaner';
+import { parseConfigJson } from './core/fetcher';
+import type { NameTransformConfig } from './core/types';
 
 export async function runAggregation(storage: Storage, config: AppConfig): Promise<void> {
   const startTime = Date.now();
@@ -55,12 +58,33 @@ async function _runAggregation(storage: Storage, config: AppConfig, startTime: n
   console.log('[aggregation] Step 1.6: Processing live sources...');
   const extraLives = await processLiveSources(storage, config);
 
+  // Step 1.8: 分离 inline:// 源，从 KV 直接加载
+  const remoteSources = sources.filter(s => !s.url.startsWith('inline://'));
+  const inlineSources = sources.filter(s => s.url.startsWith('inline://'));
+  const inlineConfigs: SourcedConfig[] = [];
+
+  for (const src of inlineSources) {
+    const kvKey = src.url.replace('inline://', '');
+    const raw = await storage.get(kvKey);
+    if (raw) {
+      const parsed = parseConfigJson(raw);
+      if (parsed) {
+        inlineConfigs.push({ sourceUrl: src.url, sourceName: src.name || 'Inline', config: parsed });
+        console.log(`[aggregation] Loaded inline config: ${kvKey}`);
+      } else {
+        console.warn(`[aggregation] Failed to parse inline config: ${kvKey}`);
+      }
+    } else {
+      console.warn(`[aggregation] Inline config not found in KV: ${kvKey}`);
+    }
+  }
+
   // Step 2: 批量 fetch 配置 JSON
   console.log('[aggregation] Step 2: Fetching configs...');
-  const sourcedConfigs = await fetchConfigs(sources, config.fetchTimeoutMs);
+  const sourcedConfigs = await fetchConfigs(remoteSources, config.fetchTimeoutMs);
 
-  if (sourcedConfigs.length === 0 && macCMSConfigs.length === 0) {
-    console.warn('[aggregation] No valid configs fetched and no MacCMS sources, keeping previous cache');
+  if (sourcedConfigs.length === 0 && inlineConfigs.length === 0 && macCMSConfigs.length === 0) {
+    console.warn('[aggregation] No valid configs fetched and no MacCMS/inline sources, keeping previous cache');
     return;
   }
 
@@ -89,7 +113,7 @@ async function _runAggregation(storage: Storage, config: AppConfig, startTime: n
 
   // Step 4: 合并（包含 MacCMS 源）
   console.log('[aggregation] Step 4: Merging configs...');
-  const allConfigs = [...filteredConfigs, ...macCMSConfigs];
+  const allConfigs = [...filteredConfigs, ...inlineConfigs, ...macCMSConfigs];
   let merged = mergeConfigs(allConfigs);
 
   // 将额外直播源注入到 merged.lives
@@ -124,6 +148,19 @@ async function _runAggregation(storage: Storage, config: AppConfig, startTime: n
   console.log('[aggregation] Step 5: Cleaning invalid entries...');
   merged = cleanEmptyEntries(merged);
   merged = cleanLocalRefs(merged);
+
+  // Step 5.5: 名称定制（清洗推广文字 + 前缀后缀）
+  const ntRaw = await storage.get(KV_NAME_TRANSFORM);
+  const nameTransform: NameTransformConfig = ntRaw ? JSON.parse(ntRaw) : {};
+  const hasTransform = nameTransform.prefix || nameTransform.suffix || nameTransform.promoReplacement || nameTransform.extraCleanPatterns?.length;
+  if (hasTransform) {
+    console.log('[aggregation] Step 5.5: Applying name transform...');
+    merged = transformSiteNames(merged, nameTransform);
+  } else {
+    // 即使没有自定义配置，默认清洗推广文字也要执行
+    console.log('[aggregation] Step 5.5: Cleaning promo text from site names...');
+    merged = transformSiteNames(merged, {});
+  }
 
   // Step 6: 本地模式站点测速 + name 标记（CF 模式跳过）
   if (!config.workerBaseUrl && merged.sites) {

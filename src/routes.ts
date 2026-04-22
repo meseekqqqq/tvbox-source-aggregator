@@ -2,8 +2,10 @@
 
 import { Hono } from 'hono';
 import type { Storage } from './storage/interface';
-import type { AppConfig, SourceEntry, MacCMSSourceEntry, LiveSourceEntry } from './core/types';
-import { KV_MERGED_CONFIG, KV_MERGED_CONFIG_FULL, KV_MANUAL_SOURCES, KV_LAST_UPDATE, KV_MACCMS_SOURCES, KV_LIVE_SOURCES, KV_BLACKLIST, LIVE_PROXY_TTL } from './core/config';
+import type { AppConfig, SourceEntry, MacCMSSourceEntry, LiveSourceEntry, NameTransformConfig } from './core/types';
+import { KV_MERGED_CONFIG, KV_MERGED_CONFIG_FULL, KV_MANUAL_SOURCES, KV_LAST_UPDATE, KV_MACCMS_SOURCES, KV_LIVE_SOURCES, KV_BLACKLIST, LIVE_PROXY_TTL, KV_INLINE_PREFIX, KV_NAME_TRANSFORM } from './core/config';
+import { parseConfigJson, isMultiRepoConfig, extractMultiRepoEntries } from './core/fetcher';
+import { decodeConfigResponse } from './core/decoder';
 import { validateMacCMS } from './core/maccms';
 import { lookupJarUrl, isMd5Key } from './core/jar-proxy';
 import { lookupLiveUrl } from './core/live-source';
@@ -119,15 +121,23 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    let body: { name?: string; url?: string };
+    let body: { name?: string; url?: string; configKey?: string };
     try {
       body = await c.req.json();
     } catch {
       return c.json({ error: 'Invalid JSON' }, 400);
     }
 
-    const url = body.url?.trim();
+    let url = body.url?.trim() || '';
     if (!url) return c.json({ error: 'URL is required' }, 400);
+
+    // 自动提取 ;pk; 密钥
+    let configKey = body.configKey?.trim() || '';
+    const pkMatch = url.match(/;pk;(.+)$/);
+    if (pkMatch) {
+      configKey = configKey || pkMatch[1];
+      url = url.replace(/;pk;.+$/, '');
+    }
 
     try {
       new URL(url);
@@ -143,7 +153,9 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: 'Source already exists' }, 409);
     }
 
-    sources.push({ name, url });
+    const entry: SourceEntry = { name, url };
+    if (configKey) entry.configKey = configKey;
+    sources.push(entry);
     await storage.put(KV_MANUAL_SOURCES, JSON.stringify(sources));
 
     return c.json({ success: true });
@@ -169,6 +181,146 @@ export function createApp(deps: AppDeps): Hono {
     const filtered = sources.filter((s) => s.url !== url);
     await storage.put(KV_MANUAL_SOURCES, JSON.stringify(filtered));
 
+    return c.json({ success: true });
+  });
+
+  // ─── JSON 导入 ─────────────────────────────────────────
+  app.post('/admin/sources/import', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: { input?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    const input = body.input?.trim();
+    if (!input) return c.json({ error: 'input is required' }, 400);
+
+    // 判断是 URL 还是 JSON 内容
+    const isUrl = /^https?:\/\//i.test(input);
+    let jsonText: string;
+    let sourceUrl: string | null = null;
+
+    // 自动提取 ;pk; 密钥
+    let configKey: string | undefined;
+    let fetchUrl = input;
+    if (isUrl) {
+      const pkMatch = input.match(/;pk;(.+)$/);
+      if (pkMatch) {
+        configKey = pkMatch[1];
+        fetchUrl = input.replace(/;pk;.+$/, '');
+      }
+      sourceUrl = fetchUrl;
+      try {
+        const resp = await fetch(fetchUrl, {
+          headers: { 'Accept': 'application/json, text/plain, */*', 'User-Agent': 'okhttp/3.12.0' },
+        });
+        if (!resp.ok) return c.json({ error: `Fetch failed: HTTP ${resp.status}` }, 502);
+        const buffer = await resp.arrayBuffer();
+        const decoded = await decodeConfigResponse(buffer, configKey);
+        jsonText = decoded || '';
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return c.json({ error: `Fetch failed: ${msg}` }, 502);
+      }
+    } else {
+      jsonText = input;
+    }
+
+    const parsed = parseConfigJson(jsonText);
+    if (!parsed) return c.json({ error: 'Failed to parse JSON' }, 400);
+
+    // 读取现有源
+    const raw = await storage.get(KV_MANUAL_SOURCES);
+    const sources: SourceEntry[] = raw ? JSON.parse(raw) : [];
+    const existingUrls = new Set(sources.map(s => s.url));
+
+    let added = 0;
+    let duplicates = 0;
+    const addedSources: string[] = [];
+
+    if (isMultiRepoConfig(parsed)) {
+      // 多仓：提取子 URL 批量添加
+      const entries = extractMultiRepoEntries(parsed, 'Imported');
+      for (const entry of entries) {
+        if (existingUrls.has(entry.url)) {
+          duplicates++;
+        } else {
+          sources.push(entry);
+          existingUrls.add(entry.url);
+          addedSources.push(entry.url);
+          added++;
+        }
+      }
+      await storage.put(KV_MANUAL_SOURCES, JSON.stringify(sources));
+      return c.json({ type: 'multi', added, duplicates, sources: addedSources });
+    } else {
+      // 单仓
+      if (sourceUrl) {
+        // 来自 URL：直接添加
+        if (existingUrls.has(sourceUrl)) {
+          return c.json({ type: 'single', added: 0, duplicates: 1, sources: [] });
+        }
+        const entry: SourceEntry = { name: 'Imported', url: sourceUrl };
+        if (configKey) entry.configKey = configKey;
+        sources.push(entry);
+        await storage.put(KV_MANUAL_SOURCES, JSON.stringify(sources));
+        return c.json({ type: 'single', added: 1, duplicates: 0, sources: [sourceUrl] });
+      } else {
+        // 粘贴的内容：存 KV 用 inline:// 引用
+        const key = `${KV_INLINE_PREFIX}${Date.now()}`;
+        await storage.put(key, jsonText);
+        const inlineUrl = `inline://${key}`;
+        sources.push({ name: 'Inline Config', url: inlineUrl });
+        await storage.put(KV_MANUAL_SOURCES, JSON.stringify(sources));
+        return c.json({ type: 'single', added: 1, duplicates: 0, sources: [inlineUrl] });
+      }
+    }
+  });
+
+  // ─── 名称定制 API ──────────────────────────────────────
+  app.get('/admin/name-transform', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    const raw = await storage.get(KV_NAME_TRANSFORM);
+    const transform: NameTransformConfig = raw ? JSON.parse(raw) : {};
+    return c.json(transform);
+  });
+
+  app.put('/admin/name-transform', async (c) => {
+    if (!verifyAdmin(c.req.raw, config)) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    let body: NameTransformConfig;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+
+    // 验证额外正则语法
+    if (body.extraCleanPatterns) {
+      for (const p of body.extraCleanPatterns) {
+        try { new RegExp(p); } catch {
+          return c.json({ error: `Invalid regex: ${p}` }, 400);
+        }
+      }
+    }
+
+    const transform: NameTransformConfig = {
+      prefix: body.prefix || undefined,
+      suffix: body.suffix || undefined,
+      promoReplacement: body.promoReplacement || undefined,
+      extraCleanPatterns: body.extraCleanPatterns?.length ? body.extraCleanPatterns : undefined,
+    };
+
+    await storage.put(KV_NAME_TRANSFORM, JSON.stringify(transform));
     return c.json({ success: true });
   });
 

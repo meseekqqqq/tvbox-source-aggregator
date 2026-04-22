@@ -92,6 +92,7 @@ export interface LiveSourceEntry {
 export interface SourceEntry {
   name: string;
   url: string;
+  configKey?: string; // AES ECB 解密密钥（来自 URL 的 ;pk; 后缀）
 }
 
 // 内部处理用：带来源标记的配置
@@ -100,6 +101,22 @@ export interface SourcedConfig {
   sourceName: string;
   config: TVBoxConfig;
   speedMs?: number; // 配置 URL 响应时间
+}
+
+// 名称定制配置
+export interface NameTransformConfig {
+  prefix?: string;
+  suffix?: string;
+  promoReplacement?: string;
+  extraCleanPatterns?: string[];
+}
+
+// JSON 导入结果
+export interface ImportResult {
+  type: 'multi' | 'single';
+  added: number;
+  duplicates: number;
+  sources: string[];
 }
 
 // 平台无关的应用配置

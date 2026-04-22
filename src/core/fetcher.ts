@@ -1,6 +1,7 @@
 // 批量 fetch TVBox JSON 配置
 
 import { DEFAULT_FETCH_TIMEOUT_MS } from './config';
+import { decodeConfigResponse } from './decoder';
 import type { TVBoxConfig, SourcedConfig, SourceEntry } from './types';
 
 const MAX_MULTI_REPO_DEPTH = 3; // 多仓最大展开深度
@@ -101,10 +102,15 @@ async function fetchSingleConfig(
       return null;
     }
 
-    const text = await response.text();
-    const config = parseConfigJson(text);
+    const buffer = await response.arrayBuffer();
+    const decoded = await decodeConfigResponse(buffer, source.configKey);
+    if (!decoded) {
+      console.warn(`[fetcher] ${source.url} returned undecodable content`);
+      return null;
+    }
+    const config = parseConfigJson(decoded);
     if (!config) {
-      console.warn(`[fetcher] ${source.url} returned invalid JSON`);
+      console.warn(`[fetcher] ${source.url} returned invalid JSON after decoding`);
       return null;
     }
 
@@ -131,7 +137,7 @@ async function fetchSingleConfig(
  * 解析配置 JSON，容错处理
  * 有些配置可能有 BOM 头、注释或其他非标准格式
  */
-function parseConfigJson(text: string): TVBoxConfig | null {
+export function parseConfigJson(text: string): TVBoxConfig | null {
   // 去掉 BOM
   let cleaned = text.replace(/^\uFEFF/, '');
 
@@ -175,7 +181,7 @@ function tryParseJson(text: string): Record<string, unknown> | null {
  * - storeHouse: {"storeHouse": [{"sourceName": "...", "sourceUrl": "..."}]}
  * - urls: {"urls": [{"name": "...", "url": "..."}]}（需排除有 sites 的单仓）
  */
-function isMultiRepoConfig(config: TVBoxConfig): boolean {
+export function isMultiRepoConfig(config: TVBoxConfig): boolean {
   const raw = config as Record<string, unknown>;
   if (Array.isArray(raw.storeHouse)) return true;
   if (Array.isArray(raw.urls) && !config.sites) return true;
@@ -185,7 +191,7 @@ function isMultiRepoConfig(config: TVBoxConfig): boolean {
 /**
  * 从多仓 JSON 中提取子源 URL 列表
  */
-function extractMultiRepoEntries(config: TVBoxConfig, parentName: string): SourceEntry[] {
+export function extractMultiRepoEntries(config: TVBoxConfig, parentName: string): SourceEntry[] {
   const raw = config as Record<string, unknown>;
   const entries: SourceEntry[] = [];
 

@@ -545,12 +545,23 @@ body::before{
     </nav>
   </header>
 
+  <!-- Import config -->
+  <div class="section">
+    <div class="section-title" data-i18n="importConfig">Import Config</div>
+    <textarea id="importInput" style="width:100%;min-height:100px;font-family:var(--mono);font-size:0.75rem;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;resize:vertical;margin-bottom:8px" placeholder="Paste TVBox JSON or URL here..." data-i18n-placeholder="importPlaceholder"></textarea>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn" id="importBtn" onclick="importConfig()" data-i18n="import">Import</button>
+      <span class="status-text" id="importResult" style="font-family:var(--mono);font-size:0.75rem"></span>
+    </div>
+  </div>
+
   <!-- Add source -->
   <div class="section">
     <div class="section-title" data-i18n="addSource">Add Source</div>
     <div class="add-form">
       <input class="name-input" type="text" id="addName" placeholder="Name (optional)" data-i18n-placeholder="nameOptional">
       <input type="url" id="addUrl" placeholder="TVBox config JSON URL" data-i18n-placeholder="configJsonUrl">
+      <input class="name-input" type="text" id="addConfigKey" placeholder="Config Key (optional, for AES ECB)">
       <button class="btn" id="addBtn" onclick="addSource()" data-i18n="add">Add</button>
     </div>
   </div>
@@ -624,6 +635,33 @@ body::before{
     </div>
   </div>
 
+  <!-- Name Transform -->
+  <div class="section">
+    <div class="section-title" data-i18n="nameTransform">Name Transform</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label style="font-family:var(--mono);font-size:0.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;display:block;margin-bottom:4px" data-i18n="ntPrefix">Prefix</label>
+        <input type="text" id="ntPrefix" style="width:100%;font-family:var(--mono);font-size:0.8rem;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;outline:none" placeholder="e.g. 【RioTV】" data-i18n-placeholder="ntPrefixPh">
+      </div>
+      <div>
+        <label style="font-family:var(--mono);font-size:0.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;display:block;margin-bottom:4px" data-i18n="ntSuffix">Suffix</label>
+        <input type="text" id="ntSuffix" style="width:100%;font-family:var(--mono);font-size:0.8rem;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;outline:none" placeholder="e.g.  · Curated" data-i18n-placeholder="ntSuffixPh">
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-family:var(--mono);font-size:0.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;display:block;margin-bottom:4px" data-i18n="ntPromoReplace">Promo Replacement (empty = delete)</label>
+      <input type="text" id="ntPromoReplace" style="width:100%;font-family:var(--mono);font-size:0.8rem;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;outline:none" placeholder="e.g. Premium" data-i18n-placeholder="ntPromoReplacePh">
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-family:var(--mono);font-size:0.65rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em;display:block;margin-bottom:4px" data-i18n="ntExtraPatterns">Extra Clean Patterns (one regex per line)</label>
+      <textarea id="ntExtraPatterns" style="width:100%;min-height:60px;font-family:var(--mono);font-size:0.75rem;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#fff;resize:vertical;outline:none" placeholder="e.g. sponsor[：:]\\S+" data-i18n-placeholder="ntExtraPatternsPh"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn" id="ntSaveBtn" onclick="saveNameTransform()" data-i18n="save">Save</button>
+      <span class="status-text" id="ntStatus" style="font-family:var(--mono);font-size:0.75rem"></span>
+    </div>
+  </div>
+
   <div class="footer">
     <span data-i18n="footer">TVBox Source Aggregator &middot; Admin Console</span>
   </div>
@@ -666,6 +704,15 @@ const translations = {
     allFieldsRequired:'All fields required', importFailed:'Import failed',
     importConfirm:'Import 23 recommended MacCMS sources?',
     aggregationStarted:'Aggregation started', refreshFailed:'Refresh failed',
+    importConfig:'Import Config', import:'Import', importing:'Importing...',
+    importPlaceholder:'Paste TVBox JSON or URL here...',
+    importMulti:'Multi-repo detected', importSingle:'Single config detected',
+    importAdded:'added', importDuplicates:'duplicates', importParseFailed:'Failed to parse',
+    nameTransform:'Name Transform', ntPrefix:'Prefix', ntSuffix:'Suffix',
+    ntPromoReplace:'Promo Replacement (empty = delete)', ntExtraPatterns:'Extra Clean Patterns (one regex per line)',
+    ntPrefixPh:'e.g. 【RioTV】', ntSuffixPh:'e.g.  · Curated',
+    ntPromoReplacePh:'e.g. Premium', ntExtraPatternsPh:'e.g. sponsor[：:]\\\\S+',
+    save:'Save', saving:'Saving...', saved:'Saved', saveFailed:'Save failed',
     footer:'TVBox Source Aggregator &middot; Admin Console',
   },
   zh: {
@@ -702,6 +749,15 @@ const translations = {
     allFieldsRequired:'所有字段必填', importFailed:'导入失败',
     importConfirm:'是否导入 23 个推荐 MacCMS 源？',
     aggregationStarted:'聚合已开始', refreshFailed:'刷新失败',
+    importConfig:'导入配置', import:'导入', importing:'导入中...',
+    importPlaceholder:'粘贴 TVBox JSON 内容或 URL...',
+    importMulti:'检测到多仓', importSingle:'检测到单仓',
+    importAdded:'已添加', importDuplicates:'重复跳过', importParseFailed:'解析失败',
+    nameTransform:'名称定制', ntPrefix:'前缀', ntSuffix:'后缀',
+    ntPromoReplace:'推广替换文字（留空则删除）', ntExtraPatterns:'额外清洗正则（每行一条）',
+    ntPrefixPh:'如 【RioTV】', ntSuffixPh:'如  · 精选',
+    ntPromoReplacePh:'如 精选推荐', ntExtraPatternsPh:'如 sponsor[：:]\\\\S+',
+    save:'保存', saving:'保存中...', saved:'已保存', saveFailed:'保存失败',
     footer:'TVBox 源聚合器 &middot; 管理控制台',
   }
 };
@@ -804,6 +860,7 @@ function loadAll() {
   loadMacCMS();
   loadLives();
   loadStatus();
+  loadNameTransform();
 }
 
 async function loadStatus() {
@@ -844,7 +901,7 @@ async function loadSources() {
     list.innerHTML = sources.map(s => \`
       <div class="source-item">
         <div class="source-info">
-          <div class="source-name">\${esc(s.name || 'Unnamed')}</div>
+          <div class="source-name">\${esc(s.name || 'Unnamed')}\${s.configKey ? ' 🔑' : ''}</div>
           <div class="source-url">\${esc(s.url)}</div>
         </div>
         <div class="source-actions">
@@ -868,22 +925,26 @@ async function addSource() {
   const url = $('addUrl').value.trim();
   if (!url) { $('addUrl').focus(); return; }
   const name = $('addName').value.trim() || '';
+  const configKey = $('addConfigKey').value.trim() || '';
 
   const btn = $('addBtn');
   btn.textContent = t('adding');
   btn.className = 'btn loading';
 
   try {
+    const payload = { name, url };
+    if (configKey) payload.configKey = configKey;
     const res = await authFetch('/admin/sources', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url })
+      body: JSON.stringify(payload)
     });
     const d = await res.json();
     if (res.ok) {
       toast(t('sourceAdded'));
       $('addUrl').value = '';
       $('addName').value = '';
+      $('addConfigKey').value = '';
       loadSources();
     } else {
       toast(d.error || t('failedLoad'), 'error');
@@ -1155,6 +1216,97 @@ async function removeLive(url) {
     if (res.ok) { toast(t('removed')); loadLives(); }
     else { const d = await res.json(); toast(d.error || 'Failed', 'error'); }
   } catch { toast(t('networkError'), 'error'); }
+}
+
+// --- Import Config ---
+async function importConfig() {
+  const input = $('importInput').value.trim();
+  if (!input) { $('importInput').focus(); return; }
+
+  const btn = $('importBtn');
+  const result = $('importResult');
+  btn.textContent = t('importing');
+  btn.className = 'btn loading';
+  result.textContent = '';
+
+  try {
+    const res = await authFetch('/admin/sources/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input })
+    });
+    const d = await res.json();
+    if (res.ok) {
+      const typeLabel = d.type === 'multi' ? t('importMulti') : t('importSingle');
+      result.textContent = typeLabel + ': ' + d.added + ' ' + t('importAdded') + (d.duplicates > 0 ? ', ' + d.duplicates + ' ' + t('importDuplicates') : '');
+      result.className = 'status-text success';
+      if (d.added > 0) {
+        $('importInput').value = '';
+        loadSources();
+      }
+    } else {
+      result.textContent = d.error || t('importParseFailed');
+      result.className = 'status-text error';
+    }
+  } catch {
+    result.textContent = t('networkError');
+    result.className = 'status-text error';
+  }
+
+  btn.textContent = t('import');
+  btn.className = 'btn';
+}
+
+// --- Name Transform ---
+async function loadNameTransform() {
+  try {
+    const res = await authFetch('/admin/name-transform');
+    if (!res.ok) return;
+    const d = await res.json();
+    $('ntPrefix').value = d.prefix || '';
+    $('ntSuffix').value = d.suffix || '';
+    $('ntPromoReplace').value = d.promoReplacement || '';
+    $('ntExtraPatterns').value = (d.extraCleanPatterns || []).join('\\n');
+  } catch {}
+}
+
+async function saveNameTransform() {
+  const btn = $('ntSaveBtn');
+  const status = $('ntStatus');
+  btn.textContent = t('saving');
+  btn.className = 'btn loading';
+  status.textContent = '';
+
+  const extraRaw = $('ntExtraPatterns').value.trim();
+  const extraCleanPatterns = extraRaw ? extraRaw.split('\\n').map(s => s.trim()).filter(Boolean) : [];
+
+  try {
+    const res = await authFetch('/admin/name-transform', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prefix: $('ntPrefix').value || '',
+        suffix: $('ntSuffix').value || '',
+        promoReplacement: $('ntPromoReplace').value || '',
+        extraCleanPatterns
+      })
+    });
+    const d = await res.json();
+    if (res.ok) {
+      status.textContent = t('saved');
+      status.className = 'status-text success';
+    } else {
+      status.textContent = d.error || t('saveFailed');
+      status.className = 'status-text error';
+    }
+  } catch {
+    status.textContent = t('networkError');
+    status.className = 'status-text error';
+  }
+
+  btn.textContent = t('save');
+  btn.className = 'btn';
+  setTimeout(() => { status.textContent = ''; }, 3000);
 }
 
 // --- Refresh ---
