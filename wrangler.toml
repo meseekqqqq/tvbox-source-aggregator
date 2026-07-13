@@ -6,16 +6,12 @@ compatibility_flags = ["nodejs_compat"]
 # 自定义域名（可选，推荐配置）
 # 取消注释并替换为你自己的域名和 Zone ID
 routes = [
-  { pattern = "tvbox.30cm.com/*", zone_id = "a6b60bd7b5026b947575cc56b4da0c0d" }
+  { pattern = "tvbox.oolist.dpdns.org/*", zone_id = "b01bf14f1a7f47300c41befe48767bba" }
    ]
 
 [triggers]
-crons = ["0 * * * *"]  # 每小时触发，实际执行频率由 Admin 设置的聚合间隔控制
+crons = ["0 5 * * *"]  # 每小时触发，实际执行频率由 Admin 设置的聚合间隔控制
 
-[[kv_namespaces]]
-binding = "KV"
-id = "5b29e836e4c04247b10eec98c8daed0d"
-preview_id = "6901d32dd5f64a8495536b0ae97228a1"
 
 [vars]
 SPEED_TIMEOUT_MS = "5000"   # 源地址延迟阈值（毫秒）
