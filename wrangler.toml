@@ -5,9 +5,9 @@ compatibility_flags = ["nodejs_compat"]
 
 # 自定义域名（可选，推荐配置）
 # 取消注释并替换为你自己的域名和 Zone ID
-routes = [
-  { pattern = "tvbox.oolist.dpdns.org/*", zone_id = "b01bf14f1a7f47300c41befe48767bba" }
-   ]
+# routes = [
+#  { pattern = "tvbox.dpdns.org/*", zone_id = "b01bf14f1a7f47300c41befe48767bba" }
+#  ]
 
 [triggers]
 crons = ["0 5 * * *"]  # 每小时触发，实际执行频率由 Admin 设置的聚合间隔控制
@@ -17,4 +17,4 @@ crons = ["0 5 * * *"]  # 每小时触发，实际执行频率由 Admin 设置的
 SPEED_TIMEOUT_MS = "5000"   # 源地址延迟阈值（毫秒）
 SITE_TIMEOUT_MS = "3000"    # 站点 API 延迟阈值（毫秒）
 FETCH_TIMEOUT_MS = "5000"   # 抓取配置 JSON 超时（毫秒）
-WORKER_BASE_URL = "https://tvbox.30cm.com"  # CF 边缘代理依赖此配置（JAR/MacCMS/直播源代理）
+# WORKER_BASE_URL = "https://tvbox.30cm.com"  # CF 边缘代理依赖此配置（JAR/MacCMS/直播源代理）
